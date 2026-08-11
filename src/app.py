@@ -1,11 +1,12 @@
 import os
+import json
 import time
 import requests
 import streamlit as st
 from streamlit_lottie import st_lottie
 from streamlit_option_menu import option_menu
 
-# Import backend engine functions
+# Import backend engine functions (including the fallback generator)
 from rag_engine import process_documents, stream_rag_pipeline, stream_general_chat
 
 # ==============================================================
@@ -14,7 +15,21 @@ from rag_engine import process_documents, stream_rag_pipeline, stream_general_ch
 st.set_page_config(page_title="CivilGPT", page_icon="🏗️", layout="wide")
 
 st.markdown("""
-
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif !important; }
+    .stExpander { border: 1px solid #334155 !important; border-radius: 12px !important; }
+    div[data-testid="column"] .stButton button {
+        border-radius: 12px;
+        border: 1px solid #334155;
+        transition: all 0.2s ease-in-out;
+    }
+    div[data-testid="column"] .stButton button:hover {
+        border-color: #38bdf8;
+        color: #38bdf8;
+        transform: translateY(-2px);
+    }
+</style>
 """, unsafe_allow_html=True)
 
 # ==============================================================
@@ -28,8 +43,7 @@ def load_lottieurl(url: str):
         return None
     return r.json()
 
-# Load animations (You can swap these URLs with any from LottieFiles.com)
-lottie_robot = load_lottieurl("https://lottie.host/4a5b4c10-eb52-44df-b4a1-052be5ad38ec/N1qKz9lPzH.json")
+# Load animations
 lottie_docs = load_lottieurl("https://lottie.host/804d9c73-f93d-4228-b09e-716d2cf7bc51/J3c0cWqVzH.json")
 
 # ==============================================================
@@ -45,7 +59,29 @@ if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
 
 # ==============================================================
-# CUSTOM NAVIGATION MENU (Replaces the Sidebar)
+# UTILITIES SIDEBAR
+# ==============================================================
+with st.sidebar:
+    st.markdown("### ⚙️ Utilities")
+    
+    if st.button("🗑️ Clear Chat History", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+        
+    # Only show the download button if there are messages to download
+    if st.session_state.messages:
+        st.divider()
+        chat_export = json.dumps(st.session_state.messages, indent=4)
+        st.download_button(
+            label="💾 Download Chat History",
+            data=chat_export,
+            file_name="civilgpt_chat_history.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+# ==============================================================
+# CUSTOM NAVIGATION MENU
 # ==============================================================
 selected_tab = option_menu(
     menu_title=None,
@@ -99,7 +135,7 @@ if selected_tab == "📚 Knowledge Base":
 # ==============================================================
 if selected_tab == "💬 CivilGPT Chat":
     
-    # Hero Section
+    # Hero Section (Only shows if chat is empty)
     if not st.session_state.messages:
         st.markdown("## 🏗️ CivilGPT Academic Copilot")
         st.write("Ground your study sessions in validated engineering textbooks. Ask complex questions below with exact page citations.")
@@ -118,7 +154,7 @@ if selected_tab == "💬 CivilGPT Chat":
 
         st.divider()
 
-    # Chat Rendering
+    # Chat Rendering Loop
     for message in st.session_state.messages:
         avatar = "🧑‍🎓" if message["role"] == "user" else "🏗️"
         with st.chat_message(message["role"], avatar=avatar):
@@ -129,9 +165,10 @@ if selected_tab == "💬 CivilGPT Chat":
                         st.markdown(f"• **{src['file']}** — *Page {src['page']}*")
 
     def handle_user_message(prompt: str) -> None:
+        """Handles RAG pipeline (if PDFs exist) or General Chat fallback."""
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # Format chat history for LangChain
+        # Format history for LangChain
         chat_history = [( "human" if msg["role"] == "user" else "ai", msg["content"] ) for msg in st.session_state.messages[:-1]]
         sources_data = []
         
@@ -154,11 +191,12 @@ if selected_tab == "💬 CivilGPT Chat":
                                 st.markdown(f"• **{file_name}** — *Page {page}*")
                                 sources_data.append({"file": file_name, "page": page})
             
-            # ROUTE 2: No Database (General AI Chat)
+            # ROUTE 2: No Database (General AI Chat Fallback)
             else:
                 st.caption("⚡ _Answering from general AI knowledge (No PDFs indexed)_")
                 full_response = st.write_stream(stream_general_chat(prompt, chat_history))
 
+        # Save to session state
         st.session_state.messages.append({
             "role": "assistant", 
             "content": full_response,
