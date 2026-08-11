@@ -10,3 +10,5 @@ python-dotenv
 requests
 streamlit-lottie
 streamlit-option-menu
+python-docx
+markdown

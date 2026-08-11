@@ -5,6 +5,9 @@ import requests
 import streamlit as st
 from streamlit_lottie import st_lottie
 from streamlit_option_menu import option_menu
+from io import BytesIO
+from docx import Document
+import markdown
 
 # Import backend engine functions (including the fallback generator)
 from rag_engine import process_documents, stream_rag_pipeline, stream_general_chat
@@ -61,6 +64,9 @@ if "pending_prompt" not in st.session_state:
 # ==============================================================
 # UTILITIES SIDEBAR
 # ==============================================================
+# ==============================================================
+# UTILITIES SIDEBAR
+# ==============================================================
 with st.sidebar:
     st.markdown("### ⚙️ Utilities")
     
@@ -68,17 +74,101 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
         
-    # Only show the download button if there are messages to download
     if st.session_state.messages:
         st.divider()
-        chat_export = json.dumps(st.session_state.messages, indent=4)
-        st.download_button(
-            label="💾 Download Chat History",
-            data=chat_export,
-            file_name="civilgpt_chat_history.json",
-            mime="application/json",
-            use_container_width=True
+        st.markdown("### 💾 Export Notes")
+        
+        # Let the user choose the format
+        export_format = st.radio(
+            "Choose Format:", 
+            ["Word Document (.docx)", "Web / PDF (.html)", "Raw Text (.md)"]
         )
+        
+        # ==========================================
+        # OPTION 1: WORD DOCUMENT
+        # ==========================================
+        if export_format == "Word Document (.docx)":
+            doc = Document()
+            doc.add_heading('CivilGPT Study Notes', 0)
+            
+            for msg in st.session_state.messages:
+                if msg["role"] == "user":
+                    doc.add_heading('Question:', level=2)
+                    doc.add_paragraph(msg["content"])
+                else:
+                    doc.add_heading('CivilGPT Answer:', level=2)
+                    doc.add_paragraph(msg["content"])
+                    
+                    if msg.get("sources"):
+                        doc.add_heading('Sources:', level=3)
+                        for src in msg["sources"]:
+                            doc.add_paragraph(f"• {src['file']} (Page {src['page']})")
+                doc.add_paragraph("_" * 40)
+            
+            bio = BytesIO()
+            doc.save(bio)
+            st.download_button(
+                label="Download Word Doc", 
+                data=bio.getvalue(), 
+                file_name="CivilGPT_Notes.docx", 
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+                use_container_width=True
+            )
+
+        # ==========================================
+        # OPTION 2: HTML TO PDF
+        # ==========================================
+        elif export_format == "Web / PDF (.html)":
+            # Generate Styled HTML that looks like a beautiful study guide
+            html_content = ""
+            html_content += "🏗️ CivilGPT Study Notes"
+            
+            for msg in st.session_state.messages:
+                if msg["role"] == "user":
+                    html_content += f"🧑‍🎓 Question:{msg['content']}"
+                else:
+                    html_content += f"🏗️ Answer:"
+                    # Convert Gemini's markdown into proper HTML tags
+                    html_content += markdown.markdown(msg['content'])
+                    
+                    if msg.get("sources"):
+                        html_content += "📚 Sources Used:"
+                        for src in msg["sources"]:
+                            html_content += f"{src['file']} (Page {src['page']})"
+                        html_content += ""
+                html_content += ""
+            html_content += ""
+            
+            st.download_button(
+                label="Download Formatted File", 
+                data=html_content.encode('utf-8'), 
+                file_name="CivilGPT_Notes.html", 
+                mime="text/html", 
+                use_container_width=True
+            )
+            st.caption("💡 *Tip: Open this file in your browser and press Cmd/Ctrl + P to Save as PDF!*")
+
+        # ==========================================
+        # OPTION 3: RAW MARKDOWN
+        # ==========================================
+        elif export_format == "Raw Text (.md)":
+            notes_content = "# 🏗️ CivilGPT Study Notes\n\n"
+            for msg in st.session_state.messages:
+                role = "🧑‍🎓 Question:" if msg["role"] == "user" else "🏗️ Answer:"
+                notes_content += f"### {role}\n{msg['content']}\n\n"
+                if msg.get("sources") and msg["role"] != "user":
+                    notes_content += "**📚 Sources Used:**\n"
+                    for src in msg["sources"]:
+                        notes_content += f"- {src['file']} (Page {src['page']})\n"
+                notes_content += "\n---\n\n"
+            
+            st.download_button(
+                label="Download Markdown", 
+                data=notes_content, 
+                file_name="CivilGPT_Notes.md", 
+                mime="text/markdown", 
+                use_container_width=True
+            )
 
 # ==============================================================
 # CUSTOM NAVIGATION MENU
