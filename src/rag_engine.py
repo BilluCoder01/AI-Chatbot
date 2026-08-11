@@ -11,6 +11,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 # 1. Load environment variables from the .env file
 load_dotenv()
@@ -21,6 +22,23 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 # Configuration paths
 DATA_DIR = "./data"
 DB_DIR = "./db"
+
+def _extract_text_from_chunk(content):
+    """
+    Safely extracts plain text strings whether content is a string
+    or a list of structured block dictionaries.
+    """
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                text_parts.append(item["text"])
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "".join(text_parts)
+    return str(content) if content else ""
 
 def process_documents(uploaded_files):
     """
@@ -138,6 +156,36 @@ def query_rag_pipeline(user_query: str) -> str:
     return response["answer"]
 
 
+def stream_general_chat(user_query: str, chat_history: list):
+    """Streams a response directly from Gemini when no PDFs are uploaded."""
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.6-flash",
+        google_api_key=GEMINI_API_KEY,
+        temperature=0.5
+    )
+
+    messages = [
+        SystemMessage(content=(
+            "You are CivilGPT, a knowledgeable AI assistant for Civil Engineering students. "
+            "Provide clear, structured, and accurate engineering answers."
+        ))
+    ]
+    
+    for role, text in chat_history:
+        if role == "human":
+            messages.append(HumanMessage(content=text))
+        else:
+            messages.append(AIMessage(content=text))
+    
+    messages.append(HumanMessage(content=user_query))
+
+    for chunk in llm.stream(messages):
+        # 🔑 Extract clean text from the chunk
+        text = _extract_text_from_chunk(chunk.content)
+        if text:
+            yield text
+
+
 def stream_rag_pipeline(user_query: str, chat_history: list, sources_container: list = None):
     """Queries ChromaDB with conversational memory and streams the answer."""
     llm = ChatGoogleGenerativeAI(
@@ -147,8 +195,6 @@ def stream_rag_pipeline(user_query: str, chat_history: list, sources_container: 
     )
     retriever = get_retriever()
     
-    # 1. Create a History-Aware Retriever
-    # This tells the LLM to resolve pronouns and context from previous messages
     contextualize_q_system_prompt = (
         "Given a chat history and the latest user question "
         "which might reference context in the chat history, "
@@ -165,7 +211,6 @@ def stream_rag_pipeline(user_query: str, chat_history: list, sources_container: 
         llm, retriever, contextualize_q_prompt
     )
 
-    # 2. Create the Question-Answering Chain
     qa_system_prompt = (
         "You are CivilGPT, a knowledgeable AI assistant for Civil Engineering students. "
         "Use the following pieces of retrieved context to answer the user's question. "
@@ -180,16 +225,14 @@ def stream_rag_pipeline(user_query: str, chat_history: list, sources_container: 
         ("human", "{input}"),
     ])
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-    
-    # 3. Combine both into the final memory-enabled RAG chain
     rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-    # 4. Stream answer chunks live AND capture sources
     for chunk in rag_chain.stream({"input": user_query, "chat_history": chat_history}):
-        # Capture the retrieved PDF documents if a container was provided
         if "context" in chunk and sources_container is not None:
             sources_container.extend(chunk["context"])
         
-        # Yield the text to Streamlit
         if "answer" in chunk:
-            yield chunk["answer"]
+            # 🔑 Extract clean text from the chunk answer
+            text = _extract_text_from_chunk(chunk["answer"])
+            if text:
+                yield text

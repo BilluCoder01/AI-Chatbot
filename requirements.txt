@@ -3,6 +3,10 @@ streamlit
 pypdf
 langchain
 langchain-community
+langchain-classic
 langchain-google-genai
 chromadb
 python-dotenv
+requests
+streamlit-lottie
+streamlit-option-menu
