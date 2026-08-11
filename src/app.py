@@ -5,6 +5,7 @@ import requests
 import streamlit as st
 from streamlit_lottie import st_lottie
 from streamlit_option_menu import option_menu
+import re
 from io import BytesIO
 from docx import Document
 import markdown
@@ -61,9 +62,18 @@ if "uploaded_file_names" not in st.session_state:
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
 
-# ==============================================================
-# UTILITIES SIDEBAR
-# ==============================================================
+def clean_ai_formatting(text: str) -> str:
+    """Removes markdown symbols like **, *, ###, and ` so text looks human-written."""
+    # Remove bold and italic asterisks/underscores
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
+    text = re.sub(r'__(.*?)__', r'\1', text)
+    text = re.sub(r'_(.*?)_', r'\1', text)
+    # Remove header hashes
+    text = re.sub(r'#+\s*', '', text)
+    # Remove inline code backticks
+    text = re.sub(r'`(.*?)`', r'\1', text)
+    return text.strip()
 # ==============================================================
 # UTILITIES SIDEBAR
 # ==============================================================
@@ -92,12 +102,15 @@ with st.sidebar:
             doc.add_heading('CivilGPT Study Notes', 0)
             
             for msg in st.session_state.messages:
+                # 🛑 Apply the cleaner function here!
+                clean_text = clean_ai_formatting(msg["content"])
+                
                 if msg["role"] == "user":
                     doc.add_heading('Question:', level=2)
-                    doc.add_paragraph(msg["content"])
+                    doc.add_paragraph(clean_text)
                 else:
                     doc.add_heading('CivilGPT Answer:', level=2)
-                    doc.add_paragraph(msg["content"])
+                    doc.add_paragraph(clean_text)
                     
                     if msg.get("sources"):
                         doc.add_heading('Sources:', level=3)
