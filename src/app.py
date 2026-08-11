@@ -9,6 +9,9 @@ import re
 from io import BytesIO
 from docx import Document
 import markdown
+import asyncio
+import nest_asyncio
+from pdf_generator import generate_pdf_bytes
 
 # Import backend engine functions (including the fallback generator)
 from rag_engine import process_documents, stream_rag_pipeline, stream_general_chat
@@ -74,6 +77,7 @@ def clean_ai_formatting(text: str) -> str:
     # Remove inline code backticks
     text = re.sub(r'`(.*?)`', r'\1', text)
     return text.strip()
+
 # ==============================================================
 # UTILITIES SIDEBAR
 # ==============================================================
@@ -88,100 +92,23 @@ with st.sidebar:
         st.divider()
         st.markdown("### 💾 Export Notes")
         
-        # Let the user choose the format
-        export_format = st.radio(
-            "Choose Format:", 
-            ["Word Document (.docx)", "Web / PDF (.html)", "Raw Text (.md)"]
-        )
-        
-        # ==========================================
-        # OPTION 1: WORD DOCUMENT
-        # ==========================================
-        if export_format == "Word Document (.docx)":
-            doc = Document()
-            doc.add_heading('CivilGPT Study Notes', 0)
-            
-            for msg in st.session_state.messages:
-                # 🛑 Apply the cleaner function here!
-                clean_text = clean_ai_formatting(msg["content"])
-                
-                if msg["role"] == "user":
-                    doc.add_heading('Question:', level=2)
-                    doc.add_paragraph(clean_text)
-                else:
-                    doc.add_heading('CivilGPT Answer:', level=2)
-                    doc.add_paragraph(clean_text)
+        # One-Click PDF Generation
+        if st.button("📄 Generate PDF Report", use_container_width=True):
+            with st.spinner("Rendering tables and math formulas..."):
+                try:
+                    # Call the Playwright backend
+                    pdf_data = asyncio.run(generate_pdf_bytes(st.session_state.messages))
                     
-                    if msg.get("sources"):
-                        doc.add_heading('Sources:', level=3)
-                        for src in msg["sources"]:
-                            doc.add_paragraph(f"• {src['file']} (Page {src['page']})")
-                doc.add_paragraph("_" * 40)
-            
-            bio = BytesIO()
-            doc.save(bio)
-            st.download_button(
-                label="Download Word Doc", 
-                data=bio.getvalue(), 
-                file_name="CivilGPT_Notes.docx", 
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
-                use_container_width=True
-            )
-
-        # ==========================================
-        # OPTION 2: HTML TO PDF
-        # ==========================================
-        elif export_format == "Web / PDF (.html)":
-            # Generate Styled HTML that looks like a beautiful study guide
-            html_content = ""
-            html_content += "🏗️ CivilGPT Study Notes"
-            
-            for msg in st.session_state.messages:
-                if msg["role"] == "user":
-                    html_content += f"🧑‍🎓 Question:{msg['content']}"
-                else:
-                    html_content += f"🏗️ Answer:"
-                    # Convert Gemini's markdown into proper HTML tags
-                    html_content += markdown.markdown(msg['content'])
-                    
-                    if msg.get("sources"):
-                        html_content += "📚 Sources Used:"
-                        for src in msg["sources"]:
-                            html_content += f"{src['file']} (Page {src['page']})"
-                        html_content += ""
-                html_content += ""
-            html_content += ""
-            
-            st.download_button(
-                label="Download Formatted File", 
-                data=html_content.encode('utf-8'), 
-                file_name="CivilGPT_Notes.html", 
-                mime="text/html", 
-                use_container_width=True
-            )
-            st.caption("💡 *Tip: Open this file in your browser and press Cmd/Ctrl + P to Save as PDF!*")
-
-        # ==========================================
-        # OPTION 3: RAW MARKDOWN
-        # ==========================================
-        elif export_format == "Raw Text (.md)":
-            notes_content = "# 🏗️ CivilGPT Study Notes\n\n"
-            for msg in st.session_state.messages:
-                role = "🧑‍🎓 Question:" if msg["role"] == "user" else "🏗️ Answer:"
-                notes_content += f"### {role}\n{msg['content']}\n\n"
-                if msg.get("sources") and msg["role"] != "user":
-                    notes_content += "**📚 Sources Used:**\n"
-                    for src in msg["sources"]:
-                        notes_content += f"- {src['file']} (Page {src['page']})\n"
-                notes_content += "\n---\n\n"
-            
-            st.download_button(
-                label="Download Markdown", 
-                data=notes_content, 
-                file_name="CivilGPT_Notes.md", 
-                mime="text/markdown", 
-                use_container_width=True
-            )
+                    st.download_button(
+                        label="⬇️ Click to Download PDF",
+                        data=pdf_data,
+                        file_name="CivilGPT_Study_Notes.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                    st.success("PDF Ready!")
+                except Exception as e:
+                    st.error(f"Error generating PDF: {e}")
 
 # ==============================================================
 # CUSTOM NAVIGATION MENU

@@ -12,3 +12,5 @@ streamlit-lottie
 streamlit-option-menu
 python-docx
 markdown
+playwright
+nest_asyncio
