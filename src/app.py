@@ -1,195 +1,147 @@
-"""
-CivilGPT — RAG-based AI Assistant for Civil Engineering Students
-------------------------------------------------------------------
-UI LAYER ONLY.
-
-This file defines the complete Streamlit front-end for CivilGPT.
-All retrieval-augmented generation logic (document parsing, chunking,
-embedding, vector storage, and LLM calls) is intentionally left as
-placeholders so the backend team can wire it in independently.
-"""
-
+import os
 import time
 import streamlit as st
 
-# TODO: Import rag_engine here
-from rag_engine import process_documents , stream_rag_pipeline
-#     get_vector_db_status,
-#     query_rag_pipeline,
-# )
-
+# Import backend engine functions
+from rag_engine import process_documents, stream_rag_pipeline
 
 # ==============================================================
 # PAGE CONFIG
 # ==============================================================
 st.set_page_config(
-    page_title="CivilGPT | AI Study Assistant",
+    page_title="CivilGPT | AI Engineering Assistant",
     page_icon="🏗️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-
 # ==============================================================
-# CUSTOM CSS
+# ADVANCED CUSTOM CSS (Modern Dark Mode / Glassmorphism)
 # ==============================================================
-CUSTOM_CSS = """
+ADVANCED_CSS = """
 <style>
-    /* ---------- Global ---------- */
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+    /* Global Theme Overrides */
     html, body, [class*="css"] {
-        font-family: 'Inter', 'Segoe UI', sans-serif;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
     }
 
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-
-    .block-container {
-        padding-top: 1.5rem;
+    .main .block-container {
+        padding-top: 2rem;
         padding-bottom: 3rem;
-        max-width: 1100px;
+        max-width: 1150px;
     }
 
-    /* ---------- Hero Header ---------- */
-    .civilgpt-hero {
-        background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
-        border-radius: 18px;
+    /* Modern Hero Header Banner */
+    .hero-container {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
         padding: 2.2rem 2.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 10px 30px rgba(15, 32, 39, 0.35);
+        margin-bottom: 2rem;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
         position: relative;
         overflow: hidden;
     }
-    .civilgpt-hero::after {
+    
+    .hero-container::before {
         content: "";
         position: absolute;
-        top: -40%;
+        top: -50%;
         right: -10%;
-        width: 300px;
-        height: 300px;
-        background: radial-gradient(circle, rgba(255,183,77,0.18) 0%, rgba(255,183,77,0) 70%);
+        width: 350px;
+        height: 350px;
+        background: radial-gradient(circle, rgba(56, 189, 248, 0.15) 0%, rgba(0,0,0,0) 70%);
         border-radius: 50%;
-    }
-    .civilgpt-hero h1 {
-        color: #ffffff;
-        font-size: 2.1rem;
-        font-weight: 800;
-        margin: 0;
-        letter-spacing: -0.5px;
-    }
-    .civilgpt-hero p {
-        color: #cfe3ea;
-        font-size: 1.02rem;
-        margin-top: 0.55rem;
-        margin-bottom: 0;
-        max-width: 640px;
-        line-height: 1.5;
-    }
-    .civilgpt-badge {
-        display: inline-block;
-        background: rgba(255, 183, 77, 0.16);
-        color: #ffb74d;
-        border: 1px solid rgba(255, 183, 77, 0.35);
-        border-radius: 999px;
-        padding: 0.25rem 0.85rem;
-        font-size: 0.78rem;
-        font-weight: 600;
-        letter-spacing: 0.3px;
-        margin-bottom: 0.9rem;
+        pointer-events: none;
     }
 
-    /* ---------- Section labels ---------- */
-    .section-label {
-        font-size: 0.82rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        color: #6b7280;
-        margin-bottom: 0.4rem;
-        margin-top: 0.2rem;
-    }
-
-    /* ---------- Sidebar ---------- */
-    section[data-testid="stSidebar"] {
-        background: #111827;
-        border-right: 1px solid #1f2937;
-    }
-    section[data-testid="stSidebar"] * {
-        color: #e5e7eb;
-    }
-    section[data-testid="stSidebar"] .stButton button {
-        width: 100%;
-        border-radius: 10px;
-        font-weight: 600;
-    }
-
-    /* ---------- Status pill ---------- */
-    .status-pill {
-        display: flex;
+    .hero-badge {
+        display: inline-flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.6rem 0.9rem;
-        border-radius: 10px;
-        font-size: 0.88rem;
+        gap: 6px;
+        background: rgba(56, 189, 248, 0.12);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 9999px;
+        padding: 0.3rem 0.85rem;
+        font-size: 0.8rem;
         font-weight: 600;
-        margin-top: 0.6rem;
-    }
-    .status-ready {
-        background: rgba(52, 211, 153, 0.12);
-        color: #34d399;
-        border: 1px solid rgba(52, 211, 153, 0.3);
-    }
-    .status-pending {
-        background: rgba(251, 191, 36, 0.12);
-        color: #fbbf24;
-        border: 1px solid rgba(251, 191, 36, 0.3);
-    }
-    .dot {
-        height: 8px;
-        width: 8px;
-        border-radius: 50%;
-        display: inline-block;
-        background: currentColor;
+        margin-bottom: 1rem;
     }
 
-    /* ---------- Quick action cards ---------- */
+    .hero-title {
+        color: #f8fafc;
+        font-size: 2.3rem;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        margin: 0;
+        line-height: 1.2;
+    }
+
+    .hero-subtitle {
+        color: #94a3b8;
+        font-size: 1.05rem;
+        margin-top: 0.75rem;
+        margin-bottom: 0;
+        line-height: 1.6;
+        max-width: 700px;
+    }
+
+    /* Sidebar Clean Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #090d16;
+        border-right: 1px solid #1e293b;
+    }
+
+    /* Sidebar Custom Cards */
+    .sidebar-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    /* Quick Action Buttons Hover Magic */
     div[data-testid="column"] .stButton button {
         width: 100%;
-        height: 100%;
-        min-height: 78px;
         border-radius: 14px;
-        border: 1px solid #e5e7eb;
-        background: #ffffff;
-        color: #1f2937;
+        border: 1px solid #334155;
+        background: #0f172a;
+        color: #e2e8f0;
         font-weight: 600;
-        text-align: left;
-        padding: 0.9rem 1rem;
-        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
-        transition: all 0.15s ease-in-out;
+        padding: 0.85rem 1rem;
+        transition: all 0.2s ease-in-out;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
+
     div[data-testid="column"] .stButton button:hover {
-        border-color: #2c5364;
-        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.10);
+        border-color: #38bdf8;
+        background: #1e293b;
+        color: #38bdf8;
         transform: translateY(-2px);
-        color: #0f2027;
+        box-shadow: 0 10px 15px -3px rgba(56, 189, 248, 0.15);
     }
 
-    /* ---------- Chat bubbles spacing ---------- */
+    /* Expander / Source Citations Styling */
+    .stExpander {
+        border: 1px solid #334155 !important;
+        border-radius: 12px !important;
+        background: #0f172a !important;
+        margin-top: 0.8rem !important;
+    }
+
+    /* Chat Avatar Polish */
     .stChatMessage {
-        margin-bottom: 0.4rem;
-    }
-
-    /* ---------- Footer note ---------- */
-    .civilgpt-footer-note {
-        text-align: center;
-        color: #9ca3af;
-        font-size: 0.78rem;
-        margin-top: 1.5rem;
+        border-radius: 14px;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
     }
 </style>
 """
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
+st.markdown(ADVANCED_CSS, unsafe_allow_html=True)
 
 # ==============================================================
 # SESSION STATE INITIALIZATION
@@ -206,70 +158,46 @@ if "uploaded_file_names" not in st.session_state:
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
 
-
 # ==============================================================
-# SIDEBAR — DOCUMENT MANAGEMENT
+# SIDEBAR — DOCUMENT MANAGEMENT & STATUS
 # ==============================================================
 with st.sidebar:
-    st.markdown("### 🏗️ CivilGPT")
-    st.caption("Your Civil Engineering knowledge base, on demand.")
+    st.markdown("## 🏗️ CivilGPT")
+    st.caption("AI Academic Assistant for Civil Engineers")
     st.divider()
 
-    st.markdown('<div class="section-label">Upload Reference Material</div>', unsafe_allow_html=True)
+    st.markdown("### 📚 Reference Documents")
     uploaded_files = st.file_uploader(
-        "Upload PDFs (IS Codes, textbooks, notes)",
+        "Upload PDFs",
         type=["pdf"],
         accept_multiple_files=True,
-        label_visibility="collapsed",
-        help="Upload one or more PDF documents to build your knowledge base.",
+        help="Upload course notes, textbooks, or IS Codes."
     )
 
     if uploaded_files:
         st.caption(f"📎 {len(uploaded_files)} file(s) selected")
 
-    process_col = st.container()
-    with process_col:
-        process_clicked = st.button(
-            "⚙️ Process Documents",
-            use_container_width=True,
-            type="primary",
-            disabled=not uploaded_files,
-        )
-
-    if process_clicked and uploaded_files:
-        with st.spinner("Reading documents and building vector index..."):
-            # Call our new function!
-            process_documents(uploaded_files)
-            
-        st.session_state.is_vector_db_ready = True
-        st.session_state.uploaded_file_names = [f.name for f in uploaded_files]
-        st.toast("Vector database ready!", icon="✅")
+    if st.button("⚙️ Process & Index Documents", type="primary", use_container_width=True, disabled=not uploaded_files):
+        with st.spinner("Chunking text & generating Gemini embeddings..."):
+            try:
+                process_documents(uploaded_files)
+                st.session_state.is_vector_db_ready = True
+                st.session_state.uploaded_file_names = [f.name for f in uploaded_files]
+                st.toast("Vector database built successfully!", icon="✅")
+            except Exception as e:
+                st.error(f"Error processing PDFs: {e}")
 
     st.divider()
-    st.markdown('<div class="section-label">Knowledge Base Status</div>', unsafe_allow_html=True)
 
+    # System Status Indicators
+    st.markdown("### ⚡ System Status")
     if st.session_state.is_vector_db_ready:
-        st.markdown(
-            """
-            <div class="status-pill status-ready">
-                <span class="dot"></span> Vector DB Ready
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if st.session_state.uploaded_file_names:
-            with st.expander("Indexed documents"):
-                for name in st.session_state.uploaded_file_names:
-                    st.markdown(f"• {name}")
+        st.success("Knowledge Base: Active", icon="🟢")
+        with st.expander("📄 Indexed Documents"):
+            for name in st.session_state.uploaded_file_names:
+                st.markdown(f"• `{name}`")
     else:
-        st.markdown(
-            """
-            <div class="status-pill status-pending">
-                <span class="dot"></span> No Documents Indexed Yet
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.warning("Knowledge Base: Not Loaded", icon="🟡")
 
     st.divider()
 
@@ -277,103 +205,140 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-    st.markdown(
-        '<div class="civilgpt-footer-note">Built for structural, geotechnical &amp; '
-        'construction engineering study.</div>',
-        unsafe_allow_html=True,
-    )
-
-
 # ==============================================================
-# HERO HEADER
+# HERO HEADER & METRICS METAPHOR
 # ==============================================================
 st.markdown(
     """
-    <div class="civilgpt-hero">
-        <div class="civilgpt-badge">🎓 RAG-Powered Study Assistant</div>
-        <h1>CivilGPT 🏗️</h1>
-        <p>
-            Ask questions grounded in your own IS Codes, textbooks, and lecture notes.
-            Upload your reference PDFs on the left, then chat with an assistant that
-            actually cites your materials — built for Civil Engineering students.
+    <div class="hero-container">
+        <div class="hero-badge">⚡ Powered by Gemini 3.6 & ChromaDB</div>
+        <h1 class="hero-title">CivilGPT Academic Copilot</h1>
+        <p class="hero-subtitle">
+            Ground your study sessions in validated engineering textbooks, design codes, and lecture notes. Ask complex structural, geotechnical, or fluid mechanics questions with exact page citations.
         </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+# Quick Stats / Status Dashboard
+m_col1, m_col2, m_col3 = st.columns(3)
+with m_col1:
+    st.metric(label="Model Engine", value="Gemini 3.6 Flash")
+with m_col2:
+    st.metric(label="Embedding Model", value="gemini-embedding-001")
+with m_col3:
+    st.metric(
+        label="Database Status", 
+        value="Ready" if st.session_state.is_vector_db_ready else "Idle",
+        delta="Indexed" if st.session_state.is_vector_db_ready else "Awaiting PDF",
+        delta_color="normal" if st.session_state.is_vector_db_ready else "off"
+    )
+
+st.divider()
 
 # ==============================================================
 # QUICK ACTIONS
 # ==============================================================
-st.markdown('<div class="section-label">Quick Actions</div>', unsafe_allow_html=True)
+st.markdown("#### 💡 Suggested Topics")
 
-qa_col1, qa_col2, qa_col3 = st.columns(3, gap="medium")
+qa_col1, qa_col2, qa_col3 = st.columns(3)
 
 quick_actions = [
-    ("🧱 Explain Concrete Curing", "Explain the concrete curing process, its methods, and why it's critical for strength development."),
-    ("📘 Summarize IS 456 Guidelines", "Summarize the key design guidelines and provisions from IS 456 for reinforced concrete structures."),
-    ("📐 Review Structural Analysis", "Review the fundamentals of structural analysis, including common methods for determinate and indeterminate structures."),
+    ("🧱 Explain Concrete Curing", "Explain the concrete curing process, its methods, and why it's critical for 28-day strength development."),
+    ("📐 Summarize IS 456 Provisions", "Summarize the key design guidelines and provisions from IS 456 for reinforced concrete beams."),
+    ("📊 Structural Deflection Methods", "Compare Moment Area Method and Conjugate Beam Method for calculating beam deflection."),
 ]
 
 for col, (label, prompt) in zip([qa_col1, qa_col2, qa_col3], quick_actions):
     with col:
-        if st.button(label, use_container_width=True, key=f"qa_{label}"):
+        if st.button(label, use_container_width=True, key=f"btn_{label}"):
             st.session_state.pending_prompt = prompt
 
 st.divider()
 
-
 # ==============================================================
-# CHAT INTERFACE
+# CHAT INTERFACE & RENDERING
 # ==============================================================
-st.markdown('<div class="section-label">Chat</div>', unsafe_allow_html=True)
+if not st.session_state.messages:
+    st.info("👋 Upload a PDF in the sidebar and ask a question, or click one of the topic cards above to start.", icon="💡")
 
-chat_container = st.container()
-
-with chat_container:
-    if not st.session_state.messages:
-        st.info(
-            "👋 Ask a question about your uploaded materials, or try one of the "
-            "quick actions above to get started.",
-            icon="💡",
-        )
-
-    for message in st.session_state.messages:
-        avatar = "🧑‍🎓" if message["role"] == "user" else "🏗️"
-        with st.chat_message(message["role"], avatar=avatar):
-            st.markdown(message["content"])
+# Render past chat history
+for message in st.session_state.messages:
+    avatar = "🧑‍🎓" if message["role"] == "user" else "🏗️"
+    with st.chat_message(message["role"], avatar=avatar):
+        st.markdown(message["content"])
+        
+        # Render source citations if attached to this message
+        if message.get("sources"):
+            with st.expander("📚 Referenced Sources & Context"):
+                for src in message["sources"]:
+                    st.markdown(f"• **{src['file']}** — *Page {src['page']}*")
+                    st.caption(f"_{src['preview']}_")
 
 
 def handle_user_message(prompt: str) -> None:
-    """Append user message and stream the assistant's reply live."""
+    """Handles prompt processing, memory pass, streaming answer, and citations."""
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     if st.session_state.is_vector_db_ready:
-        # Display the assistant avatar and stream the response
+        # Build chat history for memory context
+        chat_history = []
+        for msg in st.session_state.messages[:-1]:
+            role = "human" if msg["role"] == "user" else "ai"
+            chat_history.append((role, msg["content"]))
+
         with st.chat_message("assistant", avatar="🏗️"):
-            # st.write_stream handles token-by-token rendering and returns the complete text
-            full_response = st.write_stream(stream_rag_pipeline(prompt))
+            sources_container = []
+            full_response = st.write_stream(stream_rag_pipeline(prompt, chat_history, sources_container))
+            
+            # Extract and format sources
+            sources_data = []
+            if sources_container:
+                unique_sources = set()
+                with st.expander("📚 Referenced Sources & Context"):
+                    for doc in sources_container:
+                        source_path = doc.metadata.get("source", "Unknown")
+                        file_name = os.path.basename(source_path)
+                        page = doc.metadata.get("page", 0) + 1
+                        
+                        source_id = f"{file_name}_pg{page}"
+                        if source_id not in unique_sources:
+                            unique_sources.add(source_id)
+                            preview = doc.page_content[:150].replace("\n", " ") + "..."
+                            
+                            st.markdown(f"• **{file_name}** — *Page {page}*")
+                            st.caption(f"_{preview}_")
+                            
+                            sources_data.append({
+                                "file": file_name,
+                                "page": page,
+                                "preview": preview
+                            })
     else:
         full_response = (
-            "⚠️ I don't have any indexed documents yet. "
-            "Please upload and process a PDF in the sidebar first so I can ground "
-            "my answers in your course materials."
+            "⚠️ Please upload and process a PDF document in the sidebar first so I can ground my answers in your study materials."
         )
+        sources_data = []
         with st.chat_message("assistant", avatar="🏗️"):
             st.markdown(full_response)
 
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+    # Save complete assistant response to history
+    st.session_state.messages.append({
+        "role": "assistant", 
+        "content": full_response,
+        "sources": sources_data
+    })
 
-# Handle a quick-action click from the previous rerun
+
+# Handle Quick Action click trigger
 if st.session_state.pending_prompt:
     prompt_to_send = st.session_state.pending_prompt
     st.session_state.pending_prompt = None
     handle_user_message(prompt_to_send)
     st.rerun()
 
-# Handle normal chat input
-user_prompt = st.chat_input("Ask CivilGPT about concrete design, IS codes, structural analysis...")
-if user_prompt:
+# Handle standard chat input
+if user_prompt := st.chat_input("Ask CivilGPT about structural analysis, concrete design, IS codes..."):
     handle_user_message(user_prompt)
     st.rerun()

@@ -1,11 +1,12 @@
 import os
 import shutil
+import time
 from dotenv import load_dotenv
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains import create_retrieval_chain, create_history_aware_retriever
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -24,9 +25,10 @@ DB_DIR = "./db"
 def process_documents(uploaded_files):
     """
     Takes Streamlit uploaded files, saves them temporarily, 
-    extracts text, chunks it, and builds a Chroma vector database.
+    extracts text, chunks it, and builds a Chroma vector database
+    with rate-limit protection for Google's Free Tier API.
     """
-    # Clear out old data to avoid duplicates during prototyping
+    # Step 1: Clean up old data and database directories to start fresh
     if os.path.exists(DATA_DIR):
         shutil.rmtree(DATA_DIR)
     os.makedirs(DATA_DIR)
@@ -37,7 +39,7 @@ def process_documents(uploaded_files):
 
     all_docs = []
     
-    # Save and Load PDFs
+    # Step 2: Save uploaded files to disk and extract text page-by-page
     for uploaded_file in uploaded_files:
         file_path = os.path.join(DATA_DIR, uploaded_file.name)
         with open(file_path, "wb") as f:
@@ -47,28 +49,44 @@ def process_documents(uploaded_files):
         docs = loader.load()
         all_docs.extend(docs)
 
-    # Chunk the text
-    # Civil Engineering docs have lots of tables and formulas. 
-    # A chunk size of 1000 with 200 overlap keeps context intact.
+    # Step 3: Chunk the extracted text into manageable pieces
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200
     )
     chunks = text_splitter.split_documents(all_docs)
 
-    # Generate Embeddings & Store in Chroma
-    # UPDATED: Using Google's new gemini-embedding-001 model
+    # Step 4: Safety Check — Ensure text was actually extracted (handles scanned/empty PDFs)
+    if not chunks:
+        raise ValueError(
+            "No text could be extracted from the uploaded PDF(s). "
+            "Please ensure the file contains selectable text and is not a scanned image or password-protected."
+        )
+
+    # Step 5: Initialize Gemini Embeddings using the active gemini-embedding-001 model
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001",
         google_api_key=GEMINI_API_KEY
     )
     
-    vector_db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
+    # Step 6: Initialize an empty Chroma vector database
+    vector_db = Chroma(
+        embedding_function=embeddings,
         persist_directory=DB_DIR
     )
     
+    # Step 7: Batch processing to prevent 429 RESOURCE_EXHAUSTED rate-limit errors
+    batch_size = 5
+
+    print(f"Total chunks to process: {len(chunks)}")
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i : i + batch_size]
+        vector_db.add_documents(batch)
+        print(f"Processed chunks {i} to {i + len(batch)}...")
+        
+        # Pause 10 seconds between batches to stay within Google's Free Tier rate limits
+        time.sleep(10)
+        
     return True
 
 def get_retriever():
@@ -120,22 +138,35 @@ def query_rag_pipeline(user_query: str) -> str:
     return response["answer"]
 
 
-def stream_rag_pipeline(user_query: str):
-    """
-    Queries ChromaDB and yields answer tokens live as Gemini generates them.
-    """
-    # 1. Initialize the LLM
+def stream_rag_pipeline(user_query: str, chat_history: list, sources_container: list = None):
+    """Queries ChromaDB with conversational memory and streams the answer."""
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.6-flash",
         google_api_key=GEMINI_API_KEY,
         temperature=0.3
     )
-
-    # 2. Get retriever
     retriever = get_retriever()
+    
+    # 1. Create a History-Aware Retriever
+    # This tells the LLM to resolve pronouns and context from previous messages
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question "
+        "which might reference context in the chat history, "
+        "formulate a standalone question which can be understood "
+        "without the chat history. Do NOT answer the question, "
+        "just reformulate it if needed and otherwise return it as is."
+    )
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", contextualize_q_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
+    )
 
-    # 3. Create System Prompt
-    system_prompt = (
+    # 2. Create the Question-Answering Chain
+    qa_system_prompt = (
         "You are CivilGPT, a knowledgeable AI assistant for Civil Engineering students. "
         "Use the following pieces of retrieved context to answer the user's question. "
         "If the answer is not in the context, say so clearly, but still try to provide "
@@ -143,17 +174,22 @@ def stream_rag_pipeline(user_query: str):
         "structured, and easy to study from.\n\n"
         "Context:\n{context}"
     )
-
-    prompt_template = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", qa_system_prompt),
+        MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+    
+    # 3. Combine both into the final memory-enabled RAG chain
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-    # 4. Chain setup
-    question_answer_chain = create_stuff_documents_chain(llm, prompt_template)
-    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
-
-    # 5. Stream answer chunks live
-    for chunk in rag_chain.stream({"input": user_query}):
+    # 4. Stream answer chunks live AND capture sources
+    for chunk in rag_chain.stream({"input": user_query, "chat_history": chat_history}):
+        # Capture the retrieved PDF documents if a container was provided
+        if "context" in chunk and sources_container is not None:
+            sources_container.extend(chunk["context"])
+        
+        # Yield the text to Streamlit
         if "answer" in chunk:
             yield chunk["answer"]
