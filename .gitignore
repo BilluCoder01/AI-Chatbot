@@ -1,0 +1,13 @@
+# Environments
+.env
+venv/
+env/
+
+# Data and Databases
+data/
+db/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
