@@ -17,6 +17,16 @@ from pdf_generator import generate_pdf_bytes
 from rag_engine import process_documents, stream_rag_pipeline, stream_general_chat
 
 # ==============================================================
+# CLOUD SETUP: INSTALL PLAYWRIGHT BROWSER
+# ==============================================================
+@st.cache_resource
+def install_playwright():
+    """Installs the Chromium browser binaries exactly once upon app startup."""
+    os.system("playwright install chromium")
+
+install_playwright()
+
+# ==============================================================
 # PAGE CONFIG & CSS
 # ==============================================================
 st.set_page_config(page_title="CivilGPT", page_icon="🏗️", layout="wide")
